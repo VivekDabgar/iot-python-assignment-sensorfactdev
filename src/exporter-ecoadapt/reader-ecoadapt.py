@@ -8,9 +8,9 @@ Python 3.7.3 compatible.
 
 import argparse
 import asyncio
+import json
 import logging
 import struct
-import json
 from datetime import datetime
 from urllib.parse import urlparse
 

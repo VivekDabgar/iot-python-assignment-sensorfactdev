@@ -48,3 +48,36 @@ Please keep in mind:
 - The result of the assignment will be a proof of concept only, but we would like to discuss how you would build it into something we might deploy to hundreds of customers.
 - Take this assignment as an opportunity to show us your style: what you like to work on, what you find important. You can neglect or handwave the boring stuff.
 - If you have any further questions, do not hesitate to contact us.
+
+# Assignment: Exporter-Ecoadapt
+
+Reads RMS voltage and frequency from an EcoAdapt Power-Elec 6 over Modbus TCP and sends them to a server over a WebSocket, every few seconds.
+
+Proof of concept. Targets a Sensorfact bridge (Raspberry Pi, Python 3.7.3).
+
+Run it
+shell
+python3 -m venv ./venv && source ./venv/bin/activate
+pip3 install -r ./requirements.txt -r ./requirements-dev.txt
+
+Three terminals:
+
+shell
+python3 dev/server.py --port 9000               # the provided receiving server
+python3 src/exporter-ecoadapt/exporter-ecoadapt.py \
+    --modbus-host 127.0.0.1 --modbus-port 5502 --ws-url ws://127.0.0.1:9000
+
+Against a real meter: --modbus-host 169.254.20.1 --modbus-port 502.
+
+The server prints:
+
+json
+{"timestamp":"...","connector":1,"channel":1,"circuit_mode":1,
+ "voltage_v":238.76,"frequency_hz":51.46}
+
+python3 -m pytest tests -q → 7 passed.
+
+Layout
+src/exporter-ecoadapt/reader-ecoadapt.py      the exporter
+dev/server.py                                 provided server, subprotocol TODO fixed
+tests/test_decode.py                          addressing + word order
