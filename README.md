@@ -55,29 +55,95 @@ Reads RMS voltage and frequency from an EcoAdapt Power-Elec 6 over Modbus TCP an
 
 Proof of concept. Targets a Sensorfact bridge (Raspberry Pi, Python 3.7.3).
 
-Run it
-shell
+Run it:
+```shell
 python3 -m venv ./venv && source ./venv/bin/activate
 pip3 install -r ./requirements.txt -r ./requirements-dev.txt
+```
 
-Three terminals:
+Terminal 1 — a fake PE6 serving the register dump from the boilerplate, so this runs with no hardware:
 
-shell
-python3 dev/server.py --port 9000               # the provided receiving server
+```shell
+python3 dev/fake_pe6.py 5502
+```
+
+Terminal 2 — the receiving server provided with the assignment:
+
+```shell
+python3 dev/server.py --port 9000
+```
+
+Terminal 3 — the exporter:
+
+```shell
 python3 src/exporter-ecoadapt/exporter-ecoadapt.py \
     --modbus-host 127.0.0.1 --modbus-port 5502 --ws-url ws://127.0.0.1:9000
+```
 
-Against a real meter: --modbus-host 169.254.20.1 --modbus-port 502.
+Against a real meter, skip terminal 1 and use --modbus-host 169.254.20.1 --modbus-port 502.
 
-The server prints:
+Terminal 3 logs sent connector 1/1: 238.76 V, 51.46 Hz. Terminal 2 shows it arrive:
 
-json
+```json
 {"timestamp":"...","connector":1,"channel":1,"circuit_mode":1,
  "voltage_v":238.76,"frequency_hz":51.46}
+ ```
 
-python3 -m pytest tests -q → 7 passed.
+Tests, no hardware needed: python3 -m pytest tests -q → 7 passed.
 
-Layout
+Attached the screenshot of what server prints:
+ ```json
+{"timestamp":"...","connector":1,"channel":1,"circuit_mode":1,
+ "voltage_v":238.76,"frequency_hz":51.46}
+ ```
+
+
+How it works:
+Every 5 seconds the exporter does three small reads from the meter.
+
+Read 1 — "is anything plugged in here?" One register tells you whether this channel has a current sensor attached. If it reads 0x0000, nothing is wired. Stop. Send nothing.
+Reads 2 and 3 — the actual numbers. Voltage takes 2 registers, frequency takes 2 registers. Turn each pair into a decimal number, put them in a JSON message, send it over the WebSocket.
+Five registers total. That's the whole loop.
+
+Where do the register numbers come from? The manual gives a formula instead of a lookup table, because the meter has 18 channels and listing all of them would be a huge table. The formula converts "connector 2, channel 1" into "register 358":
+
+```python
+def get_addr(start, connector, channel, wpc):
+    return start + ((connector - 1) * 3 + (channel - 1)) * wpc
+	```
+wpc means words per channel — how many registers one value takes up. It has to be an argument, not a fixed number, because it changes:
+
+the configuration value is small → 1 register each
+voltage and frequency are decimals → 2 registers each
+
+Three things that bite:
+1. The two halves arrive backwards.
+A decimal number is too big for one register, so the meter splits it in half and sends both. But it sends the small half first. If you join them in the order they arrive, you get −43.32 instead of 238.76.
+The dangerous part: −43.32 is still a number. Nothing crashes. It just quietly sends wrong data forever. That's why the tests focus here.
+
+2. There are two ways to ask, and only one is right.
+Modbus has different "read" commands. This meter keeps measurements in input registers, so you must use read_input_registers. Use the other one and you get nothing useful back.
+
+3. The meter answers even when nobody's home.
+Ask about any of the 18 channels and the meter always replies — even for a socket with no sensor plugged in. Those empty inputs read tiny values like 0.16 V. That's electrical noise, not a measurement. Publish it and your dashboard shows a machine using electricity that doesn't exist.
+
+That's what read 1 prevents.
+
+Not done:
+Four honest gaps:
+
+If the server goes down, those readings are gone. The exporter doesn't hold anything in memory to send later.
+
+If either connection drops, the program stops. It doesn't try again.
+
+Three-phase machines aren't handled specially. Doesn't matter here — voltage and frequency are measured once at the meter's power input, so they're the same for every channel. It would matter for power and energy readings.
+
+The Modbus read pauses everything else while it happens. With five registers that's a few milliseconds, so nobody notices. With many meters it would.
+
+START-HERE.md explains the device, the full register map, and which of these I'd fix first.
+
+```Layout
 src/exporter-ecoadapt/reader-ecoadapt.py      the exporter
 dev/server.py                                 provided server, subprotocol TODO fixed
 tests/test_decode.py                          addressing + word order
+```
