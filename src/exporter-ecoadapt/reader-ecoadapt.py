@@ -90,6 +90,8 @@ def read_channel(client, connector, channel, unit):
 # ---------------------------------------------------------------------------
 
 class ExporterProtocol(WebSocketClientProtocol):
+  """WebSocket client. Once the connection opens, samples the meter every `interval`
+    seconds and sends each reading as JSON; skips disabled channels and bad reads."""
 
   def onConnect(self, res):
     log.info("Connected: %r", res.protocol)
