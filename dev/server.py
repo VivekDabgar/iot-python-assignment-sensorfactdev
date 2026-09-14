@@ -33,13 +33,18 @@ import argparse
 
 from autobahn.asyncio.websocket import WebSocketServerProtocol, WebSocketServerFactory
 
+# Must match the subprotocol the exporter offers.
+SUBPROTOCOL = "sensorfact.v1"
+
 
 class MyServerProtocol(WebSocketServerProtocol):
 
     def onConnect(self, request):
         print("Client connecting: {0}".format(request.peer))
-        # TODO Return a protocol here that matches the sender
-        return ""
+        # The client offers a list of subprotocols; the server has to pick one of them and return it.
+        if SUBPROTOCOL in request.protocols:
+            return SUBPROTOCOL
+        raise ConnectionRefusedError("client offered {0}, expected {1}".format(request.protocols, SUBPROTOCOL))
 
     async def onOpen(self):
         print("WebSocket connection open.")
