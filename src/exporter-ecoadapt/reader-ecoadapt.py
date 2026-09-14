@@ -50,15 +50,20 @@ def read_registers(client, address, count, unit):
     """Read registers from the EcoAdapt device."""
 
     response = client.read_input_registers(address, count, unit=unit)
-    if response.isError():
+    if response is None or response.isError():
         raise IOError("Modbus read of %d register(s) at %d failed: %r"
                       % (count, address, response))
     return response.registers
 
 
 def read_channel(client, connector, channel, unit):
-    """Read voltage and frequency from a channel of the EcoAdapt device."""
+    """ Read voltage and frequency from a channel of the EcoAdapt device.
 
+    The meter answers for all 18 channels whether or not a current sensor is
+    attached. An unwired channel returns floating-input noise (0.16 V in the
+    captured dump), which must not be published as a measurement. Registers
+    8..25 hold one configuration enum per channel; 0x0000 means disabled.
+    """
     config_addr = get_addr(START_CONFIG, connector, channel, WPC_CONFIG)
     config = read_registers(client, config_addr, WPC_CONFIG, unit)[0]
     if config == CIRCUIT_DISABLED:
@@ -71,7 +76,7 @@ def read_channel(client, connector, channel, unit):
     f_regs = read_registers(client, f_addr, WPC_FLOAT, unit)
 
     return {
-       "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
         "connector": connector,
         "channel": channel,
         "circuit_mode": config,
@@ -103,7 +108,7 @@ class ExporterProtocol(WebSocketClientProtocol):
         if sample is None:
           log.warning("Connector %d channel %d is disabled", cfg.connector, cfg.channel)
         else:
-          self.sendMessage(json.dumps(sample).encode())
+          self.sendMessage(json.dumps(sample).encode("utf8"))
           log.info(
               "Sent %d/%d: %.2fV, %.2fHz",
               sample["connector"],
@@ -144,7 +149,7 @@ def main():
 
     parsed = urlparse(args.ws_url)
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(loop.create_connection(factory, parsed.hostname, parsed.port))
+    loop.run_until_complete(loop.create_connection(factory, parsed.hostname, parsed.port or 80))
 
     try:
         loop.run_forever()
